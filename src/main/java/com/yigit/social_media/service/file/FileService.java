@@ -17,6 +17,7 @@ public class FileService {
     private String uploadDir;
     
     @Value("${file.upload-dir}")
+    
     public void setUploadDir(String uploadDir) {
         this.uploadDir = uploadDir;
     }

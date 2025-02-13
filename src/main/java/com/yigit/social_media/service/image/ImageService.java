@@ -8,10 +8,16 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.UUID;
 import java.nio.file.StandardCopyOption;
+import java.util.Arrays;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.util.unit.DataSize;
 
 import com.yigit.social_media.dto.image.response.ImageResponseDTO;
 import com.yigit.social_media.model.Post;
@@ -35,18 +41,24 @@ public class ImageService implements IImageService {
     private final ImageMapper imageMapper;
     private final SecurityUtils securityUtils;
     private final AuthenticationFacade authenticationFacade;
-    private final String uploadDir = "uploads/images/";
+    private final String uploadDir;
+    private final long maxFileSize; 
 
-    public ImageService(PostRepository postRepository, 
-                       ImageRepository imageRepository, 
-                       ImageMapper imageMapper,
-                       SecurityUtils securityUtils,
-                       AuthenticationFacade authenticationFacade) {
+    public ImageService(
+            PostRepository postRepository, 
+            ImageRepository imageRepository, 
+            ImageMapper imageMapper,
+            SecurityUtils securityUtils,
+            AuthenticationFacade authenticationFacade,
+            @Value("${file.upload-dir}") String uploadDir,
+            @Value("${spring.servlet.multipart.max-file-size}") String maxFileSize) {
         this.postRepository = postRepository;
         this.imageRepository = imageRepository;
         this.imageMapper = imageMapper;
         this.securityUtils = securityUtils;
         this.authenticationFacade = authenticationFacade;
+        this.uploadDir = uploadDir;
+        this.maxFileSize = DataSize.parse(maxFileSize).toBytes();
         createUploadDirectory();
     }
 
@@ -58,6 +70,28 @@ public class ImageService implements IImageService {
             }
         } catch (IOException e) {
             throw new RuntimeException("Could not create upload directory!", e);
+        }
+    }
+
+    private void validateFileSize(MultipartFile file) {
+        if (file.getSize() > maxFileSize) {
+            throw new IllegalArgumentException(
+                String.format("File size exceeds maximum limit of %d bytes", maxFileSize)
+            );
+        }
+    }
+
+    private void validateImageContent(MultipartFile file) throws IOException {
+        try (InputStream input = file.getInputStream()) {
+            BufferedImage image = ImageIO.read(input);
+            if (image == null) {
+                throw new IllegalArgumentException("Invalid image content");
+            }
+            
+            // Maksimum boyut kontrolü
+            if (image.getWidth() > 5000 || image.getHeight() > 5000) {
+                throw new IllegalArgumentException("Image dimensions too large");
+            }
         }
     }
 
@@ -74,6 +108,7 @@ public class ImageService implements IImageService {
 
         List<Image> images = new ArrayList<>();
         for (MultipartFile file : files) {
+            validateFileSize(file);
             if (file.isEmpty()) {
                 continue;
             }
@@ -83,6 +118,7 @@ public class ImageService implements IImageService {
             }
 
             try {
+                validateImageContent(file);
                 String fileName = generateUniqueFileName(file);
                 Path targetLocation = Paths.get(uploadDir + fileName);
                 Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
@@ -101,8 +137,23 @@ public class ImageService implements IImageService {
     }
 
     private boolean isImageFile(MultipartFile file) {
+        // Content type kontrolü
         String contentType = file.getContentType();
-        return contentType != null && contentType.startsWith("image/");
+        if (contentType == null || !contentType.startsWith("image/")) {
+            return false;
+        }
+        
+        // İzin verilen formatlar
+        List<String> allowedExtensions = Arrays.asList(".jpg", ".jpeg", ".png", ".gif");
+        
+        // Dosya uzantısı kontrolü
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename != null) {
+            String extension = originalFilename.toLowerCase();
+            return allowedExtensions.stream().anyMatch(ext -> extension.endsWith(ext));
+        }
+        
+        return false;
     }
 
     private String generateUniqueFileName(MultipartFile file) {
@@ -215,9 +266,26 @@ public class ImageService implements IImageService {
     }
 
     private String saveImageFile(MultipartFile file) throws IOException {
-        String fileName = UUID.randomUUID().toString() + "_" + file.getOriginalFilename();
-        Path filePath = Paths.get(uploadDir + fileName);
-        Files.copy(file.getInputStream(), filePath);
-        return filePath.toString();
+        String fileName = UUID.randomUUID().toString() + getSecureExtension(file);
+        Path targetLocation = Paths.get(uploadDir).resolve(fileName).normalize();
+        
+        // Path traversal kontrolü
+        if (!targetLocation.startsWith(Paths.get(uploadDir).normalize())) {
+            throw new SecurityException("Invalid file path detected");
+        }
+        
+        Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
+        return "/uploads/images/" + fileName;
+    }
+
+    private String getSecureExtension(MultipartFile file) {
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename != null && originalFilename.contains(".")) {
+            String extension = originalFilename.substring(originalFilename.lastIndexOf(".")).toLowerCase();
+            if (Arrays.asList(".jpg", ".jpeg", ".png", ".gif").contains(extension)) {
+                return extension;
+            }
+        }
+        return ".jpg"; // Default extension
     }
 }

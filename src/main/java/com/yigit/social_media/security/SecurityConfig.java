@@ -49,8 +49,7 @@ public class SecurityConfig {
                                "/swagger-resources",
                                "/webjars/**").permitAll()
                 .requestMatchers("/uploads/**").permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/v1/posts/**").permitAll()
-                .requestMatchers(HttpMethod.DELETE, "/api/v1/posts/**").authenticated()
+                .requestMatchers(HttpMethod.GET, "/api/v1/posts/**").permitAll()
                 .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated()
             )
@@ -85,9 +84,16 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList("*"));
+        configuration.setAllowedOrigins(Arrays.asList(
+            "http://localhost:3000",  // Frontend URL'leri
+            "https://your-production-domain.com"
+        ));
+        configuration.setAllowCredentials(true);  // Güvenli çerezler için
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("authorization", "content-type", "x-auth-token"));
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type"));
+        configuration.setExposedHeaders(Arrays.asList("Authorization"));
+        configuration.setMaxAge(3600L);  // CORS önbelleği
+        
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
